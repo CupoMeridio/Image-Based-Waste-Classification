@@ -573,9 +573,9 @@ class ExperimentManager:
         with open(config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False)
     
-    def save_history(self, history: Dict, exp_dir: Path):
+    def save_history(self, history: Dict, exp_dir: Path, filename: str = "history.json"):
         """Salva la cronologia del training."""
-        history_path = exp_dir / "logs" / "history.json"
+        history_path = exp_dir / "logs" / filename
         # Converte eventuali tipi numpy in float Python, serializzabili in JSON.
         serializable_history = {}
         for key, values in history.items():
@@ -621,7 +621,7 @@ class ExperimentManager:
         
         plt.suptitle(f"Training Curves - {model_name}", fontsize=14, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(plots_dir / "training_curves.png", dpi=150, bbox_inches='tight')
+        plt.savefig(plots_dir / f"{model_name}_training_curves.png", dpi=150, bbox_inches='tight')
         plt.close()
     
     def save_confusion_matrix(self, y_true: np.ndarray, y_pred: np.ndarray, 
@@ -653,7 +653,7 @@ class ExperimentManager:
         
         plt.suptitle(f"Confusion Matrix - {model_name}", fontsize=14, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(plots_dir / "confusion_matrix.png", dpi=150, bbox_inches='tight')
+        plt.savefig(plots_dir / f"{model_name}_confusion_matrix.png", dpi=150, bbox_inches='tight')
         plt.close()
     
     def save_classification_report(self, y_true: np.ndarray, y_pred: np.ndarray,
