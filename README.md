@@ -61,7 +61,7 @@ Progetto Machine Learning/
 
 > **Nota:** il file `waste_type_identification.zip` **non è incluso nel repository** per via delle dimensioni (≈ 240 MB). Segui la sezione **Setup** per scaricarlo.
 
-La cartella `Vecchio progetto/` contiene materiale precedente e non fa parte della versione pulita del nuovo progetto.
+
 
 ## Funzionalità
 
