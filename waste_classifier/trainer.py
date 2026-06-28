@@ -590,11 +590,6 @@ class ExperimentManager:
         with open(resource_path, 'w') as f:
             json.dump(records, f, indent=2)
     
-    def save_model_weights(self, model: nn.Module, exp_dir: Path, filename: str = "model.pth"):
-        """Salva i pesi del modello."""
-        weights_path = exp_dir / "models" / filename
-        torch.save(model.state_dict(), weights_path)
-    
     def save_training_curves(self, history: Dict, exp_dir: Path, model_name: str):
         """Salva i grafici delle curve di training."""
         plots_dir = exp_dir / "plots"
