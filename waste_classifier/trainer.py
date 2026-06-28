@@ -17,6 +17,12 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, Subset
 from torchvision import models, transforms
 from sklearn.metrics import balanced_accuracy_score, classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
+from collections import Counter
+from rich.console import Console
+from rich.table import Table
+from rich import box
+import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from PIL import Image
@@ -763,3 +769,235 @@ def get_default_augmentation_strategies() -> Dict[str, Dict]:
             "add_noise": False, "add_noise_p": 0.0,
         },
     }
+
+def get_advanced_stratification_labels(dataset_path: str, dataset_samples: List[Tuple[str, int]]) -> List[str]:
+    """
+    Genera le etichette combinate 'MacroClass (SubClass)' per la stratificazione.
+    """
+    labels = []
+    root = Path(dataset_path)
+    for path_str, _ in dataset_samples:
+        p = Path(path_str)
+        rel_path = p.relative_to(root)
+        parts = rel_path.parts
+        
+        if len(parts) < 2:
+            raise ValueError(
+                f"Struttura del dataset non valida: il file '{path_str}' si trova "
+                f"direttamente nella root anziché in una sottocartella di classe."
+            )
+            
+        macro_class = parts[0]
+        if len(parts) > 2:
+            sub_class = "/".join(parts[1:-1])
+            labels.append(f"{macro_class} ({sub_class})")
+        else:
+            labels.append(macro_class)
+    return labels
+
+def advanced_stratified_split(
+    dataset_path: str, 
+    dataset_samples: List[Tuple[str, int]],
+    split_type: str = "static", 
+    train_ratio: float = 0.7, 
+    random_seed: int = 42
+) -> Tuple[List[int], List[int], Optional[List[int]], List[str]]:
+    """
+    Esegue lo split preservando la distribuzione delle sottoclassi.
+    Ritorna: train_indices, test_indices, val_indices (se split_type=='static' altrimenti None), stratification_labels
+    """
+    labels = get_advanced_stratification_labels(dataset_path, dataset_samples)
+    
+    # Check for labels with less than 2 samples, as train_test_split will crash
+    label_counts = Counter(labels)
+    rare_labels = [label for label, count in label_counts.items() if count < 2]
+    if rare_labels:
+        raise ValueError(
+            f"Errore nello split stratificato: Le seguenti sottoclassi hanno meno di 2 campioni "
+            f"e non possono essere suddivise in modo sicuro: {rare_labels}. "
+            "Aggiungi più immagini a queste categorie o rimuovile dal dataset."
+        )
+
+    indices = list(range(len(dataset_samples)))
+    
+    if split_type == "static":
+        test_size = 1.0 - train_ratio
+        # Primo split: Train vs Temp (Val+Test)
+        train_idx, temp_idx, y_train, y_temp = train_test_split(
+            indices, labels, 
+            test_size=test_size, 
+            random_state=random_seed, 
+            stratify=labels
+        )
+        # Secondo split: divide Temp a metà per avere Val e Test
+        val_idx, test_idx, _, _ = train_test_split(
+            temp_idx, y_temp, 
+            test_size=0.5, 
+            random_state=random_seed, 
+            stratify=y_temp
+        )
+        return train_idx, test_idx, val_idx, labels
+    else:
+        # K-Fold prepara: divisione solo in Train e Test
+        test_size = 1.0 - train_ratio
+        train_idx, test_idx, _, _ = train_test_split(
+            indices, labels, 
+            test_size=test_size, 
+            random_state=random_seed, 
+            stratify=labels
+        )
+        return train_idx, test_idx, None, labels
+
+def analyze_dataset_with_rich(
+    stratification_labels: List[str], 
+    train_idx: List[int], 
+    test_idx: List[int], 
+    val_idx: Optional[List[int]] = None
+):
+    """
+    Stampa l'analisi dettagliata del dataset usando rich, stile vecchio progetto.
+    """
+    console = Console()
+    
+    y_train = [stratification_labels[i] for i in train_idx]
+    y_test = [stratification_labels[i] for i in test_idx]
+    
+    conteggio_train = Counter(y_train)
+    conteggio_test = Counter(y_test)
+    
+    if val_idx is not None:
+        y_val = [stratification_labels[i] for i in val_idx]
+        conteggio_val = Counter(y_val)
+        tot_val = len(val_idx)
+    else:
+        conteggio_val = Counter()
+        tot_val = 0
+        
+    tot_train = len(train_idx)
+    tot_test = len(test_idx)
+    tot_completo = tot_train + tot_test + tot_val
+    
+    table = Table(
+        title="Analisi Stratificazione del Dataset",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold #E879F9",
+        title_style="bold #E879F9",
+        min_width=75,
+    )
+    table.add_column("Categoria / Sottocategoria", style="#E879F9", min_width=30)
+    table.add_column("Train", justify="right", style="#4ADE80", header_style="bold #4ADE80")
+    if val_idx is not None:
+        table.add_column("Validation", justify="right", style="#FACC15", header_style="bold #FACC15")
+    table.add_column("Test", justify="right", style="#38BDF8", header_style="bold #38BDF8")
+    
+    macro_corrente = None
+    
+    for cat in sorted(set(stratification_labels)):
+        macro = cat.split(" (")[0]
+        
+        if macro != macro_corrente:
+            if macro_corrente is not None:
+                table.add_section()
+            macro_corrente = macro
+            
+        qta_train = conteggio_train[cat]
+        qta_test = conteggio_test[cat]
+        qta_val = conteggio_val[cat] if val_idx is not None else 0
+        
+        totale_cat = qta_train + qta_test + qta_val
+        
+        def fmt(qta, tot_cat, tot_split):
+            if tot_split == 0: return "0 (0%)"
+            pct_loc = (qta / tot_cat * 100) if tot_cat > 0 else 0
+            pct_glob = (qta / tot_split * 100) if tot_split > 0 else 0
+            return f"{qta:,}  ({pct_loc:.0f}% | {pct_glob:.1f}%)"
+            
+        label = f"  ↳ {cat.split('(')[1].rstrip(')')}" if "(" in cat else cat
+        
+        if val_idx is not None:
+            table.add_row(label, fmt(qta_train, totale_cat, tot_train),
+                          fmt(qta_val, totale_cat, tot_val),
+                          fmt(qta_test, totale_cat, tot_test))
+        else:
+            table.add_row(label, fmt(qta_train, totale_cat, tot_train),
+                          fmt(qta_test, totale_cat, tot_test))
+                          
+    table.add_section()
+    
+    def fmt_tot(n, tot):
+        if tot == 0: return "0 (0%)"
+        return f"{n:,}  ({n/tot*100:.1f}%)"
+        
+    if val_idx is not None:
+        table.add_row("TOTALE", fmt_tot(tot_train, tot_completo),
+                      fmt_tot(tot_val, tot_completo),
+                      fmt_tot(tot_test, tot_completo),
+                      style="bold #E879F9")
+    else:
+        table.add_row("TOTALE", fmt_tot(tot_train, tot_completo),
+                      fmt_tot(tot_test, tot_completo),
+                      style="bold #E879F9")
+                      
+    console.print(table)
+
+def print_dataset_structure_with_rich(dataset_path: str):
+    """
+    Stampa la struttura iniziale del dataset prima dello split (Table 1 del vecchio progetto).
+    """
+    console = Console()
+    
+    if not os.path.exists(dataset_path):
+        console.print(f"[red]Errore: Il percorso {dataset_path} non esiste.[/red]")
+        return
+        
+    etichette = sorted(
+        nome for nome in os.listdir(dataset_path)
+        if os.path.isdir(os.path.join(dataset_path, nome))
+    )
+    
+    righe = []
+    totale_complessivo = 0
+    estensioni_immagini = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+    
+    for etichetta in etichette:
+        percorso_macro = os.path.join(dataset_path, etichetta)
+        totale_macro = 0
+        sottocartelle = []
+        ha_sottocartelle_effettive = False
+        
+        for dirpath, _, files in os.walk(percorso_macro):
+            n = sum(1 for f in files if f.lower().endswith(estensioni_immagini))
+            if n > 0:
+                totale_macro += n
+                percorso_relativo = os.path.relpath(dirpath, percorso_macro)
+                if percorso_relativo != ".":
+                    ha_sottocartelle_effettive = True
+                    sottocartelle.append((percorso_relativo, n))
+                    
+        righe.append((etichetta, totale_macro, sottocartelle if ha_sottocartelle_effettive else []))
+        totale_complessivo += totale_macro
+        
+    table = Table(
+        title="Struttura Dataset",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold #E879F9",
+        title_style="bold #E879F9",
+        min_width=60,
+    )
+    table.add_column("Categoria", style="#E879F9", min_width=35)
+    table.add_column("N. immagini", justify="right", style="#4ADE80", header_style="bold #4ADE80")
+    table.add_column("% totale", justify="right", style="#38BDF8", header_style="bold #38BDF8")
+    
+    for etichetta, conteggio, sottocartelle in righe:
+        pct = f"{conteggio / totale_complessivo * 100:.1f}%" if totale_complessivo > 0 else "0%"
+        table.add_row(etichetta, f"{conteggio:,}", pct, style="bold")
+        for nome_sub, cnt_sub in sottocartelle:
+            pct_sub = f"{cnt_sub / totale_complessivo * 100:.1f}%" if totale_complessivo > 0 else "0%"
+            table.add_row(f"  ↳ {nome_sub}", f"{cnt_sub:,}", pct_sub)
+        table.add_section()
+        
+    table.add_row("TOTALE", f"{totale_complessivo:,}", "100.0%", style="bold #E879F9")
+    console.print(table)
+
