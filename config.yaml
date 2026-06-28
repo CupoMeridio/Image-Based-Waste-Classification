@@ -1,0 +1,143 @@
+dataset:
+  zip_path: "waste_type_identification.zip"
+  extracted_name: "waste_type_identification"
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  random_seed: 42
+
+models:
+  efficientnet_b0:
+    enabled: true
+    pretrained: true
+    dropout: 0.3
+    unfreeze_blocks: [5, 6, 7]
+    input_size: 224
+    
+  efficientnet_b2:
+    enabled: false
+    pretrained: true
+    dropout: 0.3
+    unfreeze_blocks: [6, 7]
+    input_size: 288
+    
+  efficientnet_b3:
+    enabled: false
+    pretrained: true
+    dropout: 0.3
+    unfreeze_blocks: [6, 7]
+    input_size: 300
+    
+  mobilenet_v3_small:
+    enabled: false
+    pretrained: true
+    dropout: 0.3
+    unfreeze_blocks: 3
+    input_size: 224
+
+training:
+  batch_size: 32
+  num_workers: 4
+  use_amp: true
+  label_smoothing: 0.1
+  mixup_alpha: 0.0
+  weight_decay: 0.0001
+  
+  feature_extraction:
+    enabled: true
+    epochs: 10
+    patience: 3
+    learning_rate: 0.001
+    
+  fine_tuning:
+    enabled: true
+    epochs: 30
+    patience: 7
+    learning_rate: 0.00001
+    
+  scheduler:
+    enabled: true
+    type: "ReduceLROnPlateau"
+    factor: 0.3
+    patience: 2
+    min_lr: 0.0000001
+
+augmentation:
+  global_aug_p: 0.6
+  use_class_specific: true
+  
+  default_strategy:
+    rotation_range: 15
+    rotation_p: 0.5
+    horizontal_flip: true
+    horizontal_flip_p: 0.5
+    zoom_range: 0.1
+    zoom_p: 0.5
+    width_shift_range: 0.05
+    height_shift_range: 0.05
+    shift_p: 0.5
+    brightness_range: [0.8, 1.2]
+    brightness_p: 0.5
+    add_noise: false
+    add_noise_p: 0.0
+    
+  class_strategies:
+    plastic:
+      rotation_range: 20
+      rotation_p: 0.7
+      horizontal_flip: true
+      horizontal_flip_p: 0.5
+      zoom_range: 0.15
+      zoom_p: 0.7
+      width_shift_range: 0.1
+      height_shift_range: 0.1
+      shift_p: 0.7
+      brightness_range: [0.3, 0.9]
+      brightness_p: 0.6
+      add_noise: false
+      
+    organic:
+      rotation_range: 20
+      rotation_p: 0.7
+      zoom_range: 0.2
+      zoom_p: 0.8
+      width_shift_range: 0.1
+      height_shift_range: 0.1
+      shift_p: 0.7
+      brightness_range: [0.5, 2.0]
+      brightness_p: 0.8
+      add_noise: true
+      add_noise_p: 0.6
+      
+    undifferentiated:
+      rotation_range: 25
+      rotation_p: 0.8
+      horizontal_flip: true
+      horizontal_flip_p: 0.6
+      zoom_range: 0.2
+      zoom_p: 0.8
+      width_shift_range: 0.15
+      height_shift_range: 0.15
+      shift_p: 0.8
+      brightness_range: [0.6, 1.3]
+      brightness_p: 0.7
+      add_noise: true
+      add_noise_p: 0.7
+
+kfold:
+  enabled: true
+  n_splits: 3
+
+evaluation:
+  compute_confusion_matrix: true
+  save_training_curves: true
+  save_per_class_metrics: true
+
+output:
+  base_dir: "experiments"
+  save_model_weights: true
+  save_history: true
+  save_resource_usage: true
+  save_logs: true
+  save_config: true
+  format: "json"

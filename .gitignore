@@ -1,0 +1,39 @@
+# Ambienti virtuali
+.venv/
+venv/
+env/
+
+# Dataset estratto (ricostruibile dallo ZIP)
+dataset/
+
+# Risultati esperimenti (grosse cartelle con pesi .pth)
+experiments/
+
+# Pesi modelli standalone
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Dataset ZIP (scaricabile separatamente da Google Drive)
+*.zip
+
+# altro
+
+Vecchio progetto/

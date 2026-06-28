@@ -1,0 +1,37 @@
+# ============================================================
+# Waste Classifier — Dipendenze Python
+# ============================================================
+# Installa con:
+#   pip install -r requirements.txt
+
+# --- Deep Learning ---
+torch>=2.0.0
+torchvision>=0.15.0
+
+# --- Data / Numerics ---
+numpy>=1.24.0
+Pillow>=9.0.0
+
+# --- Machine Learning / Metriche ---
+scikit-learn>=1.2.0
+
+# --- Plotting ---
+matplotlib>=3.7.0
+
+# --- Configurazione ---
+pyyaml>=6.0
+
+# --- Progress bar ---
+tqdm>=4.65.0
+
+# --- Monitoraggio risorse ---
+psutil>=5.9.0
+
+# --- Notebook / Widget interattivi ---
+jupyter>=1.0.0
+jupyterlab>=4.0.0
+ipywidgets>=8.0.0
+widgetsnbextension>=4.0.0
+
+# --- Rich (usato negli script del vecchio progetto, opzionale) ---
+rich>=13.0.0
