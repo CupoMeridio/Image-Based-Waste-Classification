@@ -237,8 +237,9 @@ class ModelFactory:
             model = models.efficientnet_b0(weights=weights)
             # In feature extraction si congela il backbone e si addestra solo
             # il classificatore finale adattato al numero di classi del dataset.
-            for p in model.parameters():
-                p.requires_grad = False
+            if pretrained:
+                for p in model.parameters():
+                    p.requires_grad = False
             num_ftrs = model.classifier[1].in_features
             model.classifier[0] = nn.Dropout(p=dropout, inplace=True)
             model.classifier[1] = nn.Linear(num_ftrs, num_classes)
@@ -248,8 +249,9 @@ class ModelFactory:
             model = models.efficientnet_b2(weights=weights)
             # Stessa strategia di EfficientNet-B0: backbone congelato,
             # classificatore sostituito.
-            for p in model.parameters():
-                p.requires_grad = False
+            if pretrained:
+                for p in model.parameters():
+                    p.requires_grad = False
             num_ftrs = model.classifier[1].in_features
             model.classifier[0] = nn.Dropout(p=dropout, inplace=True)
             model.classifier[1] = nn.Linear(num_ftrs, num_classes)
@@ -258,8 +260,9 @@ class ModelFactory:
             weights = models.EfficientNet_B3_Weights.DEFAULT if pretrained else None
             model = models.efficientnet_b3(weights=weights)
             # B3 usa lo stesso layout del classificatore delle altre EfficientNet.
-            for p in model.parameters():
-                p.requires_grad = False
+            if pretrained:
+                for p in model.parameters():
+                    p.requires_grad = False
             num_ftrs = model.classifier[1].in_features
             model.classifier[0] = nn.Dropout(p=dropout, inplace=True)
             model.classifier[1] = nn.Linear(num_ftrs, num_classes)
@@ -269,8 +272,9 @@ class ModelFactory:
             model = models.mobilenet_v3_small(weights=weights)
             # MobileNet ha un classificatore con indici diversi rispetto a
             # EfficientNet, quindi si sostituisce l'ultimo layer lineare.
-            for p in model.parameters():
-                p.requires_grad = False
+            if pretrained:
+                for p in model.parameters():
+                    p.requires_grad = False
             in_feats = model.classifier[3].in_features
             model.classifier[2] = nn.Dropout(p=dropout, inplace=True)
             model.classifier[3] = nn.Linear(in_feats, num_classes)
@@ -857,7 +861,8 @@ def analyze_dataset_with_rich(
     """
     Stampa l'analisi dettagliata del dataset usando rich, stile vecchio progetto.
     """
-    console = Console()
+    # Force a larger width and ANSI terminal output to prevent Jupyter HTML clipping
+    console = Console(force_terminal=True, width=200)
     
     y_train = [stratification_labels[i] for i in train_idx]
     y_test = [stratification_labels[i] for i in test_idx]
@@ -881,15 +886,14 @@ def analyze_dataset_with_rich(
         title="Analisi Stratificazione del Dataset",
         box=box.ROUNDED,
         show_header=True,
-        header_style="bold #E879F9",
-        title_style="bold #E879F9",
-        min_width=75,
+        header_style="bold magenta",
+        title_style="bold magenta"
     )
-    table.add_column("Categoria / Sottocategoria", style="#E879F9", min_width=30)
-    table.add_column("Train", justify="right", style="#4ADE80", header_style="bold #4ADE80")
+    table.add_column("Categoria / Sottocategoria", style="magenta", no_wrap=True)
+    table.add_column("Train", justify="right", style="green", header_style="bold green", no_wrap=True)
     if val_idx is not None:
-        table.add_column("Validation", justify="right", style="#FACC15", header_style="bold #FACC15")
-    table.add_column("Test", justify="right", style="#38BDF8", header_style="bold #38BDF8")
+        table.add_column("Validation", justify="right", style="yellow", header_style="bold yellow", no_wrap=True)
+    table.add_column("Test", justify="right", style="cyan", header_style="bold cyan", no_wrap=True)
     
     macro_corrente = None
     
@@ -933,11 +937,11 @@ def analyze_dataset_with_rich(
         table.add_row("TOTALE", fmt_tot(tot_train, tot_completo),
                       fmt_tot(tot_val, tot_completo),
                       fmt_tot(tot_test, tot_completo),
-                      style="bold #E879F9")
+                      style="bold magenta")
     else:
         table.add_row("TOTALE", fmt_tot(tot_train, tot_completo),
                       fmt_tot(tot_test, tot_completo),
-                      style="bold #E879F9")
+                      style="bold magenta")
                       
     console.print(table)
 
@@ -945,7 +949,8 @@ def print_dataset_structure_with_rich(dataset_path: str):
     """
     Stampa la struttura iniziale del dataset prima dello split (Table 1 del vecchio progetto).
     """
-    console = Console()
+    # Force a larger width and ANSI terminal output to prevent Jupyter HTML clipping
+    console = Console(force_terminal=True, width=200)
     
     if not os.path.exists(dataset_path):
         console.print(f"[red]Errore: Il percorso {dataset_path} non esiste.[/red]")
@@ -958,7 +963,8 @@ def print_dataset_structure_with_rich(dataset_path: str):
     
     righe = []
     totale_complessivo = 0
-    estensioni_immagini = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+    # Add all standard PyTorch extensions
+    estensioni_immagini = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
     
     for etichetta in etichette:
         percorso_macro = os.path.join(dataset_path, etichetta)
@@ -982,13 +988,12 @@ def print_dataset_structure_with_rich(dataset_path: str):
         title="Struttura Dataset",
         box=box.ROUNDED,
         show_header=True,
-        header_style="bold #E879F9",
-        title_style="bold #E879F9",
-        min_width=60,
+        header_style="bold magenta",
+        title_style="bold magenta"
     )
-    table.add_column("Categoria", style="#E879F9", min_width=35)
-    table.add_column("N. immagini", justify="right", style="#4ADE80", header_style="bold #4ADE80")
-    table.add_column("% totale", justify="right", style="#38BDF8", header_style="bold #38BDF8")
+    table.add_column("Categoria", style="magenta", no_wrap=True)
+    table.add_column("N. immagini", justify="right", style="green", header_style="bold green", no_wrap=True)
+    table.add_column("% totale", justify="right", style="cyan", header_style="bold cyan", no_wrap=True)
     
     for etichetta, conteggio, sottocartelle in righe:
         pct = f"{conteggio / totale_complessivo * 100:.1f}%" if totale_complessivo > 0 else "0%"
@@ -998,6 +1003,6 @@ def print_dataset_structure_with_rich(dataset_path: str):
             table.add_row(f"  ↳ {nome_sub}", f"{cnt_sub:,}", pct_sub)
         table.add_section()
         
-    table.add_row("TOTALE", f"{totale_complessivo:,}", "100.0%", style="bold #E879F9")
+    table.add_row("TOTALE", f"{totale_complessivo:,}", "100.0%", style="bold magenta")
     console.print(table)
 
