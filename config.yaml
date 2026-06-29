@@ -46,13 +46,15 @@ training:
   feature_extraction:
     enabled: true
     epochs: 10
-    patience: 3
+    patience: 5
+    min_delta: 0.001
     learning_rate: 0.001
     
   fine_tuning:
     enabled: true
     epochs: 30
     patience: 7
+    min_delta: 0.0005
     learning_rate: 0.00001
     
   scheduler:
