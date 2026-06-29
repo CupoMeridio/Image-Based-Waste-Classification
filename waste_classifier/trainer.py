@@ -808,6 +808,7 @@ def advanced_stratified_split(
     dataset_samples: List[Tuple[str, int]],
     split_type: str = "static", 
     train_ratio: float = 0.7, 
+    test_ratio: float = 0.15,
     random_seed: int = 42
 ) -> Tuple[List[int], List[int], Optional[List[int]], List[str]]:
     """
@@ -847,7 +848,7 @@ def advanced_stratified_split(
         return train_idx, test_idx, val_idx, labels
     else:
         # K-Fold prepara: divisione solo in Train e Test
-        test_size = 1.0 - train_ratio
+        test_size = test_ratio
         train_idx, test_idx, _, _ = train_test_split(
             indices, labels, 
             test_size=test_size, 
