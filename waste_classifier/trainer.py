@@ -332,6 +332,7 @@ class Trainer:
             "val_loss": [], "val_bal_acc": []
         }
         self.resource_tracker = ResourceTracker(self.device)
+        self.stop_requested = False
         # Lo scaler viene creato una sola volta e usato solo su CUDA.
         self._scaler: Optional[torch.amp.GradScaler] = (
             torch.amp.GradScaler(self.device.type)
@@ -465,6 +466,9 @@ class Trainer:
         self.resource_tracker.start(phase)
         epochs_run = 0
         for epoch in range(1, epochs + 1):
+            if self.stop_requested:
+                print("\n[!] Training interrotto manualmente dall'utente.")
+                break
             epochs_run = epoch
             # Ogni epoca alterna addestramento e validazione, poi aggiorna
             # metriche, scheduler ed eventuale checkpoint migliore.

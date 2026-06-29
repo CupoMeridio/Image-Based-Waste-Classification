@@ -6,7 +6,7 @@ L'obiettivo è addestrare e validare modelli in PyTorch capaci di riconoscere la
 
 ## Obiettivo del Progetto
 
-Il sistema affronta il task "Waste type identification" indicato nella traccia del progetto. La soluzione deve classificare ogni immagine in una delle 8 classi previste, mantenendo un buon compromesso tra:
+Il sistema affronta il task "Waste type identification". La soluzione deve classificare ogni immagine in una delle 8 classi previste, mantenendo un buon compromesso tra:
 
 - balanced accuracy sul test set privato;
 - memoria GPU richiesta in test;
