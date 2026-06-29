@@ -498,21 +498,17 @@ class Trainer:
                 else:
                     scheduler.step()
 
-            if val_bal_acc > best_val_bal_acc:
+            if val_bal_acc > best_val_bal_acc + min_delta:
                 best_weights = copy.deepcopy(model.state_dict())
                 torch.save(model.state_dict(), save_path)
                 print(f"  -> Nuovo miglior modello salvato! (Bal-Acc: {val_bal_acc:.4f})")
-
-            # L'early stopping conta le epoche senza miglioramenti sufficienti.
-            if val_bal_acc > best_val_bal_acc + min_delta:
                 epochs_no_improve = 0
+                best_val_bal_acc = val_bal_acc
             else:
                 epochs_no_improve += 1
                 if epochs_no_improve >= patience:
                     print(f"\nEarly stopping dopo {epoch} epoche.")
                     break
-
-            best_val_bal_acc = max(best_val_bal_acc, val_bal_acc)
 
         # A fine training il modello torna ai pesi migliori osservati in validazione.
         model.load_state_dict(best_weights)
