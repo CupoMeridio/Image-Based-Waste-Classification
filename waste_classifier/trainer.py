@@ -212,6 +212,59 @@ class AddGaussianNoise:
         return Image.fromarray((noisy * 255).astype(np.uint8))
 
 
+class RandomAffineWithReflectPad:
+    """
+    Alternativa a RandomAffine che usa padding 'reflect' invece di fill=0.
+
+    Applica padding simmetrico prima della trasformazione affine in modo che
+    le aree vuote create dalla rotazione/traslazione siano riempite con pixel
+    reali riflessi dal bordo, eliminando gli artefatti neri nel CenterCrop finale.
+
+    Strategia:
+        1. Padding reflect di `pad` pixel su tutti e 4 i lati.
+        2. RandomAffine sulla versione padded.
+        3. CenterCrop per tornare alle dimensioni originali (rimuove il padding).
+    """
+
+    def __init__(
+        self,
+        degrees: float = 0,
+        translate: Optional[Tuple[float, float]] = None,
+        scale: Optional[Tuple[float, float]] = None,
+        pad: int = 64,
+        p: float = 0.5,
+        interpolation=transforms.InterpolationMode.BILINEAR,
+    ):
+        self.pad = pad
+        self.p = p
+        self._pad_fn = transforms.Pad(pad, padding_mode="reflect")
+        self._affine = transforms.RandomAffine(
+            degrees=degrees,
+            translate=translate,
+            scale=scale,
+            interpolation=interpolation,
+            fill=0,
+        )
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        if torch.rand(1).item() >= self.p:
+            return img
+        w, h = img.size
+        padded = self._pad_fn(img)           # (W+2*pad) × (H+2*pad)
+        rotated = self._affine(padded)       # applica trasformazione sull'immagine padded
+        return transforms.CenterCrop((h, w))(rotated)  # ritaglia alle dimensioni originali
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"degrees={self._affine.degrees}, "
+            f"translate={self._affine.translate}, "
+            f"scale={self._affine.scale}, "
+            f"pad={self.pad}, "
+            f"p={self.p})"
+        )
+
+
 class AdaptiveAugmentationDataset(Dataset):
     """Dataset con augmentation adattiva per classe."""
     
@@ -259,24 +312,18 @@ class AdaptiveAugmentationDataset(Dataset):
         rotation = params.get("rotation_range", 0)
         if rotation > 0:
             p = params.get("rotation_p", 0.5)
-            steps.append(transforms.RandomApply(
-                [transforms.RandomAffine(degrees=rotation)], p=p
-            ))
+            steps.append(RandomAffineWithReflectPad(degrees=rotation, pad=64, p=p))
 
         shift_x = params.get("width_shift_range", 0)
         shift_y = params.get("height_shift_range", 0)
         if shift_x > 0 or shift_y > 0:
             p = params.get("shift_p", 0.5)
-            steps.append(transforms.RandomApply(
-                [transforms.RandomAffine(degrees=0, translate=(shift_x, shift_y))], p=p
-            ))
+            steps.append(RandomAffineWithReflectPad(degrees=0, translate=(shift_x, shift_y), pad=64, p=p))
 
         zoom = params.get("zoom_range", 0)
         if zoom > 0:
             p = params.get("zoom_p", 0.5)
-            steps.append(transforms.RandomApply(
-                [transforms.RandomAffine(degrees=0, scale=(1 - zoom, 1 + zoom))], p=p
-            ))
+            steps.append(RandomAffineWithReflectPad(degrees=0, scale=(1 - zoom, 1 + zoom), pad=64, p=p))
 
         if params.get("horizontal_flip", False):
             p = params.get("horizontal_flip_p", 0.5)
@@ -536,23 +583,9 @@ class Trainer:
         initial_best: float = 0.0,
         scheduler: Optional[Any] = None,
         use_amp: bool = True,
-        label_smoothing: float = 0.0,
         phase_name: Optional[str] = None,
     ) -> Dict:
-        """Training completo con early stopping.
-        
-        Args:
-            label_smoothing: Se > 0, sovrascrive il criterion con uno identico
-                             ma con label_smoothing attivo. Ignorato se il
-                             criterion passato non è CrossEntropyLoss.
-        """
-        if label_smoothing > 0.0 and isinstance(criterion, nn.CrossEntropyLoss):
-            # Il label smoothing rende il modello meno sicuro su una singola
-            # classe e può aiutare la generalizzazione.
-            criterion = nn.CrossEntropyLoss(
-                weight=criterion.weight,
-                label_smoothing=label_smoothing,
-            )
+        """Training completo con early stopping."""
 
         # Resetta il flag prima di ogni fase: un'interruzione manuale durante
         # la FE non deve bloccare automaticamente la FT o i fold successivi.
@@ -638,29 +671,50 @@ class Trainer:
         model: nn.Module,
         loader: DataLoader,
         phase_name: str = "inference_benchmark",
-        max_batches: Optional[int] = None,
+        num_runs: int = 50,
+        warmup_runs: int = 5,
     ) -> Dict[str, Any]:
-        """Misura throughput e memoria durante inferenza su un loader."""
+        """
+        Misura throughput puro della GPU/CPU (escludendo il data loading).
+        Usa un singolo batch tenuto in memoria per misurare i veri FPS hardware.
+        """
         model.eval()
+        
+        # Prende un singolo batch reale per avere forma e tipo esatti
+        try:
+            inputs, _ = next(iter(loader))
+        except StopIteration:
+            return {}
+            
+        inputs = inputs.to(self.device)
+        batch_size = inputs.size(0)
+
+        # Warmup: forza l'inizializzazione di cuDNN e l'autotune di PyTorch
+        # così da non inquinare i tempi misurati successivamente.
+        for _ in range(warmup_runs):
+            _ = model(inputs)
+            
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
+
         self.resource_tracker.start(phase_name)
 
-        total_samples = 0
-        total_batches = 0
-        for batch_idx, (inputs, _) in enumerate(loader):
-            if max_batches is not None and batch_idx >= max_batches:
-                break
-            inputs = inputs.to(self.device)
+        # Misurazione pura
+        for _ in range(num_runs):
             _ = model(inputs)
-            total_samples += inputs.size(0)
-            total_batches += 1
+            
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
 
+        total_samples = batch_size * num_runs
         record = self.resource_tracker.stop(phase_name, {
             "samples": total_samples,
-            "batches": total_batches,
-            "batch_size": getattr(loader, "batch_size", None),
+            "batches": num_runs,
+            "batch_size": batch_size,
         })
         duration = record.get("duration_seconds") or 0.0
         record["samples_per_second"] = total_samples / duration if duration > 0 else None
+        
         return record
 
 class ExperimentManager:
@@ -950,12 +1004,22 @@ def advanced_stratified_split(
             stratify=labels
         )
         # Secondo split: divide Temp a metà per avere Val e Test
-        val_idx, test_idx, _, _ = train_test_split(
-            temp_idx, y_temp, 
-            test_size=0.5, 
-            random_state=random_seed, 
-            stratify=y_temp
-        )
+        try:
+            val_idx, test_idx, _, _ = train_test_split(
+                temp_idx, y_temp, 
+                test_size=0.5, 
+                random_state=random_seed, 
+                stratify=y_temp
+            )
+        except ValueError as e:
+            print(f"[Warning] Stratificazione annidata fallita (sottoclassi troppo piccole). Fallback su split casuale per Val/Test.")
+            val_idx, test_idx, _, _ = train_test_split(
+                temp_idx, y_temp, 
+                test_size=0.5, 
+                random_state=random_seed, 
+                stratify=None
+            )
+            
         return train_idx, test_idx, val_idx, labels
     else:
         # K-Fold prepara: divisione solo in Train e Test
