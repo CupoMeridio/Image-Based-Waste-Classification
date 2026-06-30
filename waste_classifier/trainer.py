@@ -863,10 +863,10 @@ class ExperimentManager:
         plt.close()
     
     def save_classification_report(self, y_true: np.ndarray, y_pred: np.ndarray,
-                                   class_names: List[str], exp_dir: Path):
+                                   class_names: List[str], exp_dir: Path, filename: str = "classification_report.txt"):
         """Salva il report di classificazione."""
         report = classification_report(y_true, y_pred, target_names=class_names, digits=4)
-        report_path = exp_dir / "logs" / "classification_report.txt"
+        report_path = exp_dir / "logs" / filename
         with open(report_path, 'w') as f:
             f.write(report)
         return report
