@@ -28,7 +28,108 @@ from tqdm import tqdm
 from PIL import Image
 import copy
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
+
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss per classificazione multi-classe.
+
+    Riduce il peso degli esempi "facili" (già classificati correttamente con
+    alta confidenza) in modo che il training si concentri sugli esempi difficili
+    e sulle classi minoritarie.
+
+    Riferimento: Lin et al., "Focal Loss for Dense Object Detection", 2017.
+
+    Args:
+        alpha (Tensor, opzionale): Vettore di pesi per classe (uno per classe).
+            Solitamente l'inverso della frequenza di ogni classe. Se None,
+            nessuna ponderazione per classe viene applicata.
+        gamma (float): Esponente del termine di focalizzazione (1 - pt)^gamma.
+            gamma=0 equivale alla CrossEntropy standard. Valore consigliato: 2.0.
+        reduction (str): 'mean' | 'sum' | 'none'.
+    """
+
+    def __init__(
+        self,
+        alpha: Optional[torch.Tensor] = None,
+        gamma: float = 2.0,
+        reduction: str = "mean",
+    ):
+        super().__init__()
+        self.alpha = alpha      # Tensor di forma [num_classes] o None
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Calcola la CE per ogni campione senza riduzione
+        ce_loss = nn.functional.cross_entropy(inputs, targets, reduction="none")
+
+        # pt = probabilità assegnata alla classe corretta
+        pt = torch.exp(-ce_loss)
+
+        # Termine modulante: abbassa la loss per esempi già classificati bene
+        focal_term = (1.0 - pt) ** self.gamma
+
+        # Applica i pesi per classe (alpha), se forniti
+        if self.alpha is not None:
+            alpha_t = self.alpha.to(inputs.device).gather(0, targets)
+            focal_term = focal_term * alpha_t
+
+        loss = focal_term * ce_loss
+
+        if self.reduction == "mean":
+            return loss.mean()
+        if self.reduction == "sum":
+            return loss.sum()
+        return loss
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"gamma={self.gamma}, "
+            f"alpha={'set' if self.alpha is not None else 'None'}, "
+            f"reduction='{self.reduction}')"
+        )
+
+
+def build_criterion(
+    use_focal: bool,
+    class_weights: Optional[torch.Tensor],
+    gamma: float = 2.0,
+    label_smoothing: float = 0.0,
+) -> nn.Module:
+    """
+    Costruisce la funzione di loss in base alle impostazioni dell'utente.
+
+    Args:
+        use_focal (bool): Se True, usa FocalLoss; altrimenti CrossEntropyLoss.
+        class_weights (Tensor | None): Pesi delle classi calcolati da
+            ``Trainer.compute_class_weights``. Usati come *alpha* nella
+            FocalLoss e come *weight* nella CrossEntropyLoss.
+        gamma (float): Parametro di focalizzazione (ignorato se use_focal=False).
+        label_smoothing (float): Applicato solo alla CrossEntropyLoss.
+
+    Returns:
+        nn.Module: Criterio pronto per essere passato a ``Trainer.train_model``.
+    """
+    if use_focal:
+        criterion = FocalLoss(
+            alpha=class_weights,
+            gamma=gamma,
+        )
+        print(f"[Loss] FocalLoss attiva  (gamma={gamma}, "
+              f"class_weights={'sì' if class_weights is not None else 'no'})")
+    else:
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=label_smoothing,
+        )
+        print(f"[Loss] CrossEntropyLoss attiva "
+              f"(label_smoothing={label_smoothing}, "
+              f"class_weights={'sì' if class_weights is not None else 'no'})")
+    return criterion
 
 
 def _process_memory_mb() -> Optional[float]:
@@ -605,19 +706,22 @@ class ExperimentManager:
         plots_dir = exp_dir / "plots"
         
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        
+
+        # L'asse X parte da 1 (epoca 1, 2, 3, …) anziché da 0.
+        epochs_range = range(1, len(history["train_loss"]) + 1)
+
         # Il primo grafico confronta la loss di training e validazione.
-        axes[0].plot(history["train_loss"], label="Train Loss", color="#3B82F6")
-        axes[0].plot(history["val_loss"], label="Val Loss", color="#EF4444")
+        axes[0].plot(epochs_range, history["train_loss"], label="Train Loss", color="#3B82F6")
+        axes[0].plot(epochs_range, history["val_loss"], label="Val Loss", color="#EF4444")
         axes[0].set_title("Loss")
         axes[0].set_xlabel("Epoca")
         axes[0].set_ylabel("Loss")
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
-        
+
         # Il secondo grafico mostra la metrica principale scelta per il dataset sbilanciato.
-        axes[1].plot(history["train_bal_acc"], label="Train Bal-Acc", color="#3B82F6")
-        axes[1].plot(history["val_bal_acc"], label="Val Bal-Acc", color="#EF4444")
+        axes[1].plot(epochs_range, history["train_bal_acc"], label="Train Bal-Acc", color="#3B82F6")
+        axes[1].plot(epochs_range, history["val_bal_acc"], label="Val Bal-Acc", color="#EF4444")
         axes[1].set_title("Balanced Accuracy")
         axes[1].set_xlabel("Epoca")
         axes[1].set_ylabel("Balanced Accuracy")
