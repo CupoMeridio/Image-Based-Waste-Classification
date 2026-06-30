@@ -2,6 +2,8 @@
 
 Progetto di classificazione automatica di immagini di rifiuti realizzato per l'esame di Machine Learning dell'Università degli Studi di Salerno (UNISA), A.A. 2025/2026.
 
+Il progetto non si limita a fornire il codice per addestrare un singolo modello da sottomettere alla valutazione finale. È una **suite di sperimentazione** pensata per configurare, eseguire e confrontare liberamente diversi esperimenti di training — variando modelli, iperparametri, strategie di augmentation e protocolli di validazione — senza sovrascrivere i risultati precedenti. Il modello da sottomettere sarà scelto al termine del processo esplorativo, sulla base dei risultati raccolti.
+
 L'obiettivo è addestrare e validare modelli in PyTorch capaci di riconoscere la classe di appartenenza di un oggetto di rifiuto a partire da immagini acquisite in condizioni diverse: risoluzioni differenti, sfondi variabili, immagini preprocessate, più oggetti della stessa classe e campioni non perfettamente rappresentativi del test set.
 
 ## Obiettivo del Progetto
@@ -61,12 +63,12 @@ Progetto Machine Learning/
 
 > **Nota:** il file `waste_type_identification.zip` **non è incluso nel repository** per via delle dimensioni (≈ 240 MB). Segui la sezione **Setup** per scaricarlo.
 
-
-
 ## Funzionalità
 
 Il notebook permette di configurare ed eseguire esperimenti completi:
 
+- gestione di esperimenti multipli con salvataggio isolato per run;
+- confronto tra configurazioni diverse tramite la sezione dedicata alla visualizzazione dei risultati;
 - estrazione e analisi del dataset;
 - split train/validation/test configurabile;
 - K-Fold Cross Validation;
@@ -75,7 +77,7 @@ Il notebook permette di configurare ed eseguire esperimenti completi:
 - uso opzionale di Mixed Precision (AMP);
 - early stopping;
 - scheduler del learning rate;
-- salvataggio di pesi, configurazione, metriche, grafici e report.
+- salvataggio di pesi, configurazione, metriche, grafici e report;
 - salvataggio delle risorse usate dal modello durante training e inferenza.
 
 ## Modelli Supportati
@@ -176,7 +178,7 @@ Per ogni esperimento vengono salvati:
 - cronologia del training in JSON;
 - curve di loss e balanced accuracy;
 - matrice di confusione;
-- classification report per classe.
+- classification report per classe;
 - report delle risorse in `logs/resource_usage.json`.
 
 Il file `resource_usage.json` contiene, per ogni fase misurata, durata, batch size, epoche eseguite, RAM di processo se disponibile, memoria GPU allocata/riservata, picco di memoria GPU e throughput in immagini al secondo per l'inferenza.
