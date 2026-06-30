@@ -18,6 +18,7 @@ from torch.utils.data import Dataset, DataLoader, Subset
 from torchvision import models, transforms
 from sklearn.metrics import balanced_accuracy_score, classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
+import random
 from collections import Counter
 from rich.console import Console
 from rich.table import Table
@@ -31,6 +32,27 @@ import copy
 __version__ = "1.2.0"
 
 
+
+def set_global_seed(seed: int = 42):
+    """
+    Imposta il seed globale per PyTorch, NumPy e Python standard,
+    garantendo la massima riproducibilità possibile tra run diversi.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+def worker_init_fn(worker_id):
+    """
+    Garantisce che ogni worker di un DataLoader riceva un seed NumPy univoco.
+    Evita il problema del rumore correlato nell'augmentation (stessi numeri 
+    casuali generati in parallelo da worker forked).
+    """
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 class FocalLoss(nn.Module):
     """
@@ -121,6 +143,9 @@ def build_criterion(
         )
         print(f"[Loss] FocalLoss attiva  (gamma={gamma}, "
               f"class_weights={'sì' if class_weights is not None else 'no'})")
+        if label_smoothing > 0.0:
+            print(f"[Warning] label_smoothing={label_smoothing} ignorato: "
+                  f"non supportato nativamente da FocalLoss.")
     else:
         criterion = nn.CrossEntropyLoss(
             weight=class_weights,
@@ -338,7 +363,8 @@ class AdaptiveAugmentationDataset(Dataset):
 
         if params.get("add_noise", False):
             p = params.get("add_noise_p", 0.5)
-            steps.append(AddGaussianNoise(p=p))
+            noise_std = params.get("add_noise_std", 0.1)
+            steps.append(AddGaussianNoise(std=noise_std, p=p))
 
         # Il crop finale uniforma tutte le immagini alla dimensione richiesta
         # dal modello e rimuove eventuali bordi introdotti dalle trasformazioni.
@@ -869,7 +895,7 @@ def analyze_dataset(dataset_path: Path) -> Dict:
         class_path = dataset_path / class_name
         count = len([
             f for f in class_path.iterdir()
-            if f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
+            if f.suffix.lower() in {'.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp'}
         ])
         stats[class_name] = count
         total += count
@@ -891,27 +917,27 @@ def get_default_augmentation_strategies() -> Dict[str, Dict]:
             "zoom_range": 0.15, "zoom_p": 0.7,
             "width_shift_range": 0.1, "height_shift_range": 0.1, "shift_p": 0.7,
             "brightness_range": [0.3, 0.9], "brightness_p": 0.6,
-            "add_noise": False, "add_noise_p": 0.0,
+            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
         },
         "organic": {
             "rotation_range": 20, "rotation_p": 0.7,
             "zoom_range": 0.2, "zoom_p": 0.8,
             "width_shift_range": 0.1, "height_shift_range": 0.1, "shift_p": 0.7,
             "brightness_range": [0.5, 2.0], "brightness_p": 0.8,
-            "add_noise": True, "add_noise_p": 0.6,
+            "add_noise": True, "add_noise_std": 0.1, "add_noise_p": 0.6,
         },
         "metal": {
             "rotation_range": 15, "rotation_p": 0.6,
             "zoom_range": 0.1, "zoom_p": 0.6,
             "width_shift_range": 0.05, "height_shift_range": 0.05, "shift_p": 0.6,
             "brightness_range": [0.7, 1.2], "brightness_p": 0.5,
-            "add_noise": False, "add_noise_p": 0.0,
+            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
         },
         "battery": {
             "rotation_range": 10, "rotation_p": 0.5,
             "zoom_range": 0.1, "zoom_p": 0.5,
             "brightness_range": [0.5, 1.5], "brightness_p": 0.4,
-            "add_noise": False, "add_noise_p": 0.0,
+            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
         },
         "undifferentiated": {
             "rotation_range": 25, "rotation_p": 0.8,
@@ -919,27 +945,27 @@ def get_default_augmentation_strategies() -> Dict[str, Dict]:
             "zoom_range": 0.2, "zoom_p": 0.8,
             "width_shift_range": 0.15, "height_shift_range": 0.15, "shift_p": 0.8,
             "brightness_range": [0.6, 1.3], "brightness_p": 0.7,
-            "add_noise": True, "add_noise_p": 0.7,
+            "add_noise": True, "add_noise_std": 0.1, "add_noise_p": 0.7,
         },
         "clothing": {
             "rotation_range": 15, "rotation_p": 0.5,
             "horizontal_flip": True, "horizontal_flip_p": 0.5,
             "zoom_range": 0.1, "zoom_p": 0.5,
             "brightness_range": [0.8, 1.2], "brightness_p": 0.4,
-            "add_noise": False, "add_noise_p": 0.0,
+            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
         },
         "papery": {
             "rotation_range": 20, "rotation_p": 0.6,
             "horizontal_flip": True, "horizontal_flip_p": 0.5,
             "zoom_range": 0.15, "zoom_p": 0.6,
             "width_shift_range": 0.1, "height_shift_range": 0.1, "shift_p": 0.5,
-            "add_noise": False, "add_noise_p": 0.0,
+            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
         },
         "glass": {
             "rotation_range": 15, "rotation_p": 0.5,
             "zoom_range": 0.1, "zoom_p": 0.5,
             "brightness_range": [0.4, 1.7], "brightness_p": 0.7,
-            "add_noise": False, "add_noise_p": 0.0,
+            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
         },
     }
 
