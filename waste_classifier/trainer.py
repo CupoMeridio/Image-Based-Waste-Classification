@@ -554,6 +554,10 @@ class Trainer:
                 label_smoothing=label_smoothing,
             )
 
+        # Resetta il flag prima di ogni fase: un'interruzione manuale durante
+        # la FE non deve bloccare automaticamente la FT o i fold successivi.
+        self.stop_requested = False
+
         best_val_bal_acc = initial_best
         epochs_no_improve = 0
         best_weights = copy.deepcopy(model.state_dict())
@@ -613,6 +617,13 @@ class Trainer:
 
         # A fine training il modello torna ai pesi migliori osservati in validazione.
         model.load_state_dict(best_weights)
+
+        # Garantisce che il file checkpoint esista sempre su disco, anche se questa
+        # fase non ha mai superato initial_best (es. FT che non batte la FE).
+        # Senza questa riga, qualsiasi codice che carica save_path (Grad-CAM,
+        # predict, ecc.) andrebbe in crash con FileNotFoundError.
+        torch.save(best_weights, save_path)
+
         self.resource_tracker.stop(phase, {
             "epochs_run": epochs_run,
             "best_val_bal_acc": best_val_bal_acc,
