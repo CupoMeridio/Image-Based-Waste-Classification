@@ -545,7 +545,7 @@ class Trainer:
 
         for inputs, labels in tqdm(loader, desc="  Training", leave=False):
             inputs, labels = inputs.to(self.device), labels.to(self.device)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             # Con AMP su GPU si riduce l'uso di memoria mantenendo stabile il
             # backward tramite GradScaler; su CPU si usa il percorso standard.
