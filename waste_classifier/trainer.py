@@ -573,18 +573,24 @@ class Trainer:
         return train_loss, train_bal_acc
     
     @torch.no_grad()
-    def evaluate(self, model: nn.Module, loader: DataLoader, criterion: nn.Module) -> Tuple[float, float]:
+    def evaluate(self, model: nn.Module, loader: DataLoader, criterion: nn.Module, use_amp: bool = False) -> Tuple[float, float]:
         """Valuta il modello."""
         model.eval()
         running_loss = 0.0
         total_samples = 0
         all_preds = []
         all_labels = []
+        device_type = self.device.type
         
         for inputs, labels in tqdm(loader, desc="  Valutazione", leave=False):
             inputs, labels = inputs.to(self.device), labels.to(self.device)
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
+            if use_amp:
+                with torch.amp.autocast(device_type):
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+            else:
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
             
             running_loss += loss.item() * inputs.size(0)
             total_samples += labels.size(0)
@@ -639,7 +645,7 @@ class Trainer:
             train_loss, train_bal_acc = self.train_epoch(
                 model, optimizer, train_loader, criterion, use_amp
             )
-            val_loss, val_bal_acc = self.evaluate(model, val_loader, criterion)
+            val_loss, val_bal_acc = self.evaluate(model, val_loader, criterion, use_amp=use_amp)
 
             history["train_loss"].append(train_loss)
             history["train_bal_acc"].append(train_bal_acc)
