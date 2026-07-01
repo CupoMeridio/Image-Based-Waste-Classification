@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, Subset
+from torch.utils.data import Dataset, DataLoader, Subset, WeightedRandomSampler
 from torchvision import models, transforms
 from sklearn.metrics import balanced_accuracy_score, classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -165,6 +165,27 @@ def _process_memory_mb() -> Optional[float]:
         return None
 
     return psutil.Process().memory_info().rss / (1024 ** 2)
+
+
+
+def get_weighted_sampler(subset: Subset) -> WeightedRandomSampler:
+    """Crea un WeightedRandomSampler bilanciato in base alla frequenza delle classi nel Subset."""
+    # Estrae i target originali
+    targets = subset.dataset.targets
+    # Ottiene i target solo per questo subset (utile nei fold)
+    subset_targets = [targets[i] for i in subset.indices]
+    
+    # Conta le frequenze usando torch
+    import torch
+    class_counts = torch.bincount(torch.tensor(subset_targets))
+    
+    # Evita divisione per zero
+    weights = torch.where(class_counts > 0, 1.0 / class_counts.float(), torch.tensor(0.0))
+    
+    # Assegna il peso ad ogni campione
+    sample_weights = weights[subset_targets]
+    
+    return WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
 
 
 class ResourceTracker:
