@@ -168,15 +168,22 @@ def _process_memory_mb() -> Optional[float]:
 
 
 
-def get_weighted_sampler(subset: Subset) -> WeightedRandomSampler:
+def get_weighted_sampler(dataset) -> WeightedRandomSampler:
     """Crea un WeightedRandomSampler bilanciato in base alla frequenza delle classi nel Subset."""
+    import torch
+    
+    # Estrae il Subset sottostante se ci viene passato un wrapper (es. AdaptiveAugmentationDataset)
+    if hasattr(dataset, 'subset_data'):
+        subset = dataset.subset_data
+    else:
+        subset = dataset
+
     # Estrae i target originali
     targets = subset.dataset.targets
     # Ottiene i target solo per questo subset (utile nei fold)
     subset_targets = [targets[i] for i in subset.indices]
     
     # Conta le frequenze usando torch
-    import torch
     class_counts = torch.bincount(torch.tensor(subset_targets))
     
     # Evita divisione per zero
@@ -925,9 +932,11 @@ class ExperimentManager:
         """Salva la matrice di confusione."""
         plots_dir = exp_dir / "plots"
         
-        cm = confusion_matrix(y_true, y_pred)
+        cm = confusion_matrix(y_true, y_pred, labels=range(len(class_names)))
         # La matrice normalizzata evidenzia gli errori percentuali per classe.
-        cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        # Usa np.errstate per gestire divisioni per zero se una classe è mancante nel set.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cm_norm = np.nan_to_num(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis])
         
         fig, axes = plt.subplots(1, 2, figsize=(18, 7))
         
@@ -955,7 +964,7 @@ class ExperimentManager:
     def save_classification_report(self, y_true: np.ndarray, y_pred: np.ndarray,
                                    class_names: List[str], exp_dir: Path, filename: str = "classification_report.txt"):
         """Salva il report di classificazione."""
-        report = classification_report(y_true, y_pred, target_names=class_names, digits=4)
+        report = classification_report(y_true, y_pred, labels=range(len(class_names)), target_names=class_names, digits=4, zero_division=0)
         report_path = exp_dir / "logs" / filename
         with open(report_path, 'w') as f:
             f.write(report)
@@ -990,8 +999,8 @@ def analyze_dataset(dataset_path: Path) -> Dict:
     for class_name in class_names:
         class_path = dataset_path / class_name
         count = len([
-            f for f in class_path.iterdir()
-            if f.suffix.lower() in {'.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp'}
+            f for f in class_path.rglob('*')
+            if f.is_file() and f.suffix.lower() in {'.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp'}
         ])
         stats[class_name] = count
         total += count
