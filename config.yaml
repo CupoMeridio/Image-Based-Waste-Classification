@@ -90,7 +90,7 @@ augmentation:
       width_shift_range: 0.1
       height_shift_range: 0.1
       shift_p: 0.7
-      brightness_range: [0.3, 0.9]
+      brightness_range: [0.7, 1.3]
       brightness_p: 0.6
       add_noise: false
 
