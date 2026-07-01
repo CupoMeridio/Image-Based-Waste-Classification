@@ -218,9 +218,12 @@ class ResourceTracker:
         return record
 
 
+_IMAGENET_MEAN = [0.485, 0.456, 0.406]
+_IMAGENET_STD  = [0.229, 0.224, 0.225]
+
+
 class AddGaussianNoise:
-    """Aggiunge rumore gaussiano a un'immagine PIL."""
-    
+    """Aggiunge rumore gaussiano a un'immagine PIL o Tensore."""
     def __init__(self, mean: float = 0.0, std: float = 0.1, p: float = 0.5):
         self.mean = mean
         self.std = std
@@ -240,17 +243,7 @@ class AddGaussianNoise:
 class RandomAffineWithReflectPad:
     """
     Alternativa a RandomAffine che usa padding 'reflect' invece di fill=0.
-
-    Applica padding simmetrico prima della trasformazione affine in modo che
-    le aree vuote create dalla rotazione/traslazione siano riempite con pixel
-    reali riflessi dal bordo, eliminando gli artefatti neri nel CenterCrop finale.
-
-    Strategia:
-        1. Padding reflect di `pad` pixel su tutti e 4 i lati.
-        2. RandomAffine sulla versione padded.
-        3. CenterCrop per tornare alle dimensioni originali (rimuove il padding).
     """
-
     def __init__(
         self,
         degrees: float = 0,
@@ -272,126 +265,98 @@ class RandomAffineWithReflectPad:
         )
 
     def __call__(self, img: Image.Image) -> Image.Image:
+        import torch
         if torch.rand(1).item() >= self.p:
             return img
         w, h = img.size
-        padded = self._pad_fn(img)           # (W+2*pad) × (H+2*pad)
-        rotated = self._affine(padded)       # applica trasformazione sull'immagine padded
-        return transforms.CenterCrop((h, w))(rotated)  # ritaglia alle dimensioni originali
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"degrees={self._affine.degrees}, "
-            f"translate={self._affine.translate}, "
-            f"scale={self._affine.scale}, "
-            f"pad={self.pad}, "
-            f"p={self.p})"
-        )
-
+        img_padded = self._pad_fn(img)
+        img_affine = self._affine(img_padded)
+        img_cropped = transforms.CenterCrop((h, w))(img_affine)
+        return img_cropped
 
 class AdaptiveAugmentationDataset(Dataset):
-    """Dataset con augmentation adattiva per classe."""
+    """
+    Dataset con augmentation semplificata e uniforme per tutte le classi.
+    Gestisce il resizing, crop e color jitter configurabili dall'utente.
+    """
     
     def __init__(
         self,
         subset_data: Subset,
         class_names_map: Dict[int, str],
-        augmentation_strategies: Dict[str, Dict],
         resize: int = 256,
         crop: int = 224,
         is_train: bool = True,
+        aug_enabled: bool = True,
         global_aug_p: float = 0.6,
+        crop_scale: Tuple[float, float] = (0.85, 1.0),
+        flip_p: float = 0.5,
+        brightness: float = 0.15,
+        contrast: float = 0.12,
+        jitter_p: float = 0.5,
+        rotation_degrees: int = 0,
+        rotation_p: float = 0.3,
+        noise_p: float = 0.0,
+        noise_std: float = 0.1,
+        affine_p: float = 0.0,
+        affine_degrees: int = 0,
+        affine_translate: float = 0.0
     ):
         self.subset_data = subset_data
         self.class_names_map = class_names_map
         self.is_train = is_train
         self.global_aug_p = global_aug_p
 
-        self.base_transform = self._build_base_transform(resize, crop)
-        self.class_transforms = {
-            name.lower(): self._build_augmentation_transform(params, resize, crop)
-            for name, params in augmentation_strategies.items()
-        }
-        self.default_aug_transform = self._build_augmentation_transform({}, resize, crop)
-
-    @staticmethod
-    def _build_base_transform(resize: int = 256, crop: int = 224) -> transforms.Compose:
-        return transforms.Compose([
+        self.eval_transform = transforms.Compose([
             transforms.Resize(resize),
             transforms.CenterCrop(crop),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
         ])
 
-    @staticmethod
-    def _build_augmentation_transform(
-        params: Dict, resize: int = 256, crop: int = 224
-    ) -> transforms.Compose:
-        # La pipeline parte dal resize e applica solo le trasformazioni abilitate
-        # nella configurazione della classe corrente.
-        steps = [
-            transforms.Resize(resize),
-        ]
-
-        rotation = params.get("rotation_range", 0)
-        if rotation > 0:
-            p = params.get("rotation_p", 0.5)
-            steps.append(RandomAffineWithReflectPad(degrees=rotation, pad=64, p=p))
-
-        shift_x = params.get("width_shift_range", 0)
-        shift_y = params.get("height_shift_range", 0)
-        if shift_x > 0 or shift_y > 0:
-            p = params.get("shift_p", 0.5)
-            steps.append(RandomAffineWithReflectPad(degrees=0, translate=(shift_x, shift_y), pad=64, p=p))
-
-        zoom = params.get("zoom_range", 0)
-        if zoom > 0:
-            p = params.get("zoom_p", 0.5)
-            steps.append(RandomAffineWithReflectPad(degrees=0, scale=(1 - zoom, 1 + zoom), pad=64, p=p))
-
-        if params.get("horizontal_flip", False):
-            p = params.get("horizontal_flip_p", 0.5)
-            steps.append(transforms.RandomHorizontalFlip(p=p))
-
-        brightness = params.get("brightness_range")
-        if brightness is not None:
-            p = params.get("brightness_p", 0.5)
-            steps.append(transforms.RandomApply(
-                [transforms.ColorJitter(brightness=tuple(brightness))], p=p
-            ))
-
-        if params.get("add_noise", False):
-            p = params.get("add_noise_p", 0.5)
-            noise_std = params.get("add_noise_std", 0.1)
-            steps.append(AddGaussianNoise(std=noise_std, p=p))
-
-        # Il crop finale uniforma tutte le immagini alla dimensione richiesta
-        # dal modello e rimuove eventuali bordi introdotti dalle trasformazioni.
-        steps += [
-            transforms.CenterCrop(crop),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-
-        return transforms.Compose(steps)
+        if aug_enabled:
+            steps = [
+                transforms.RandomResizedCrop(crop, scale=crop_scale, ratio=(0.9, 1.1), antialias=True),
+                transforms.RandomHorizontalFlip(p=flip_p),
+            ]
+            if jitter_p > 0 and (brightness > 0 or contrast > 0):
+                steps.append(transforms.RandomApply([transforms.ColorJitter(brightness=brightness, contrast=contrast)], p=jitter_p))
+            
+            if rotation_degrees > 0 and rotation_p > 0:
+                steps.append(transforms.RandomApply([transforms.RandomRotation(rotation_degrees, fill=255)], p=rotation_p))
+            
+            if affine_p > 0:
+                steps.append(RandomAffineWithReflectPad(
+                    degrees=affine_degrees, 
+                    translate=(affine_translate, affine_translate) if affine_translate > 0 else None,
+                    p=affine_p
+                ))
+            
+            if noise_p > 0:
+                steps.append(AddGaussianNoise(std=noise_std, p=noise_p))
+            
+            steps.extend([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
+            ])
+            self.train_transform = transforms.Compose(steps)
+        else:
+            self.train_transform = self.eval_transform
 
     def __len__(self) -> int:
         return len(self.subset_data)
 
     def __getitem__(self, idx: int):
         img, label = self.subset_data[idx]
-
         if not self.is_train:
-            return self.base_transform(img), label
-
-        if torch.rand(1).item() >= self.global_aug_p:
-            return self.base_transform(img), label
-
-        # Ogni classe può avere una strategia diversa; se manca, usa quella base.
-        class_name = self.class_names_map[label].lower()
-        aug_transform = self.class_transforms.get(class_name, self.default_aug_transform)
-        return aug_transform(img), label
+            tf = self.eval_transform
+        else:
+            import torch
+            if torch.rand(1).item() >= self.global_aug_p:
+                tf = self.eval_transform
+            else:
+                tf = self.train_transform
+        return tf(img), label
 
 class ModelFactory:
     """Factory per creare modelli di classificazione."""
@@ -914,66 +879,7 @@ def analyze_dataset(dataset_path: Path) -> Dict:
     }
 
 
-def get_default_augmentation_strategies() -> Dict[str, Dict]:
-    """Restituisce le strategie di augmentation predefinite per classe."""
-    return {
-        "plastic": {
-            "rotation_range": 20, "rotation_p": 0.7,
-            "horizontal_flip": True, "horizontal_flip_p": 0.5,
-            "zoom_range": 0.15, "zoom_p": 0.7,
-            "width_shift_range": 0.1, "height_shift_range": 0.1, "shift_p": 0.7,
-            "brightness_range": [0.3, 0.9], "brightness_p": 0.6,
-            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
-        },
-        "organic": {
-            "rotation_range": 20, "rotation_p": 0.7,
-            "zoom_range": 0.2, "zoom_p": 0.8,
-            "width_shift_range": 0.1, "height_shift_range": 0.1, "shift_p": 0.7,
-            "brightness_range": [0.5, 2.0], "brightness_p": 0.8,
-            "add_noise": True, "add_noise_std": 0.1, "add_noise_p": 0.6,
-        },
-        "metal": {
-            "rotation_range": 15, "rotation_p": 0.6,
-            "zoom_range": 0.1, "zoom_p": 0.6,
-            "width_shift_range": 0.05, "height_shift_range": 0.05, "shift_p": 0.6,
-            "brightness_range": [0.7, 1.2], "brightness_p": 0.5,
-            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
-        },
-        "battery": {
-            "rotation_range": 10, "rotation_p": 0.5,
-            "zoom_range": 0.1, "zoom_p": 0.5,
-            "brightness_range": [0.5, 1.5], "brightness_p": 0.4,
-            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
-        },
-        "undifferentiated": {
-            "rotation_range": 25, "rotation_p": 0.8,
-            "horizontal_flip": True, "horizontal_flip_p": 0.6,
-            "zoom_range": 0.2, "zoom_p": 0.8,
-            "width_shift_range": 0.15, "height_shift_range": 0.15, "shift_p": 0.8,
-            "brightness_range": [0.6, 1.3], "brightness_p": 0.7,
-            "add_noise": True, "add_noise_std": 0.1, "add_noise_p": 0.7,
-        },
-        "clothing": {
-            "rotation_range": 15, "rotation_p": 0.5,
-            "horizontal_flip": True, "horizontal_flip_p": 0.5,
-            "zoom_range": 0.1, "zoom_p": 0.5,
-            "brightness_range": [0.8, 1.2], "brightness_p": 0.4,
-            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
-        },
-        "papery": {
-            "rotation_range": 20, "rotation_p": 0.6,
-            "horizontal_flip": True, "horizontal_flip_p": 0.5,
-            "zoom_range": 0.15, "zoom_p": 0.6,
-            "width_shift_range": 0.1, "height_shift_range": 0.1, "shift_p": 0.5,
-            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
-        },
-        "glass": {
-            "rotation_range": 15, "rotation_p": 0.5,
-            "zoom_range": 0.1, "zoom_p": 0.5,
-            "brightness_range": [0.4, 1.7], "brightness_p": 0.7,
-            "add_noise": False, "add_noise_std": 0.1, "add_noise_p": 0.0,
-        },
-    }
+
 
 def get_advanced_stratification_labels(dataset_path: str, dataset_samples: List[Tuple[str, int]]) -> List[str]:
     """

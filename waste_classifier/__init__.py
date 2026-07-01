@@ -5,6 +5,7 @@ Waste Classifier Trainer Package
 from .trainer import (
     AdaptiveAugmentationDataset,
     AddGaussianNoise,
+    RandomAffineWithReflectPad,
     ResourceTracker,
     ModelFactory,
     Trainer,
@@ -13,7 +14,6 @@ from .trainer import (
     build_criterion,
     extract_dataset,
     analyze_dataset,
-    get_default_augmentation_strategies,
     get_advanced_stratification_labels,
     advanced_stratified_split,
     analyze_dataset_with_rich,
@@ -30,6 +30,7 @@ from .calibration import (
 __all__ = [
     "AdaptiveAugmentationDataset",
     "AddGaussianNoise",
+    "RandomAffineWithReflectPad",
     "ResourceTracker",
     "ModelFactory",
     "Trainer",
@@ -38,7 +39,6 @@ __all__ = [
     "build_criterion",
     "extract_dataset",
     "analyze_dataset",
-    "get_default_augmentation_strategies",
     "get_advanced_stratification_labels",
     "advanced_stratified_split",
     "analyze_dataset_with_rich",
