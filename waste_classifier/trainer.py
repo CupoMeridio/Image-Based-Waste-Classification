@@ -379,6 +379,86 @@ class AdaptiveAugmentationDataset(Dataset):
                 tf = self.train_transform
         return tf(img), label
 
+class CoordinateAttention(nn.Module):
+    """
+    Attenzione posizionale direzionale (Coordinate Attention).
+    Fa pooling separato lungo H e W, codifica la posizione lungo i due assi
+    e modula la feature map di conseguenza. NON e' attenzione fotometrica:
+    opera su feature semantiche, non su luminosita'/ombre dei pixel.
+
+    Init a IDENTITA': all'avvio a_h≈a_w≈1 -> output≈input, cosi' le feature
+    pretrained passano intatte al punto di innesto e la CA impara a deviare
+    solo dove serve (preserva il transfer learning). Con random init standard
+    la CA attenuerebbe le feature di ~4x (misurato) proprio dove non vuoi.
+    """
+    def __init__(self, inp, oup, reduction=32):
+        super().__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+
+        mip = max(8, inp // reduction)   # bottleneck; floor a 8 canali
+
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1   = nn.BatchNorm2d(mip)
+        self.act   = nn.SiLU()           # coerente con EfficientNet
+
+        self.conv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+
+        # --- Init a identita' ---
+        nn.init.zeros_(self.conv_h.weight)
+        nn.init.constant_(self.conv_h.bias, 4.0)
+        nn.init.zeros_(self.conv_w.weight)
+        nn.init.constant_(self.conv_w.bias, 4.0)
+
+    def forward(self, x):
+        identity = x
+        n, c, h, w = x.size()
+
+        x_h = self.pool_h(x)                      # [n, c, h, 1]
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)  # [n, c, w, 1]
+
+        y = torch.cat([x_h, x_w], dim=2)          # [n, c, h+w, 1]
+        y = self.act(self.bn1(self.conv1(y)))
+
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)             # [n, mip, 1, w]
+
+        a_h = self.conv_h(x_h).sigmoid()          # [n, oup, h, 1]
+        a_w = self.conv_w(x_w).sigmoid()          # [n, oup, 1, w]
+
+        return identity * a_h * a_w
+
+class EfficientNetB0WithMiddleCA(nn.Module):
+    """
+    EfficientNet-B0 con Coordinate Attention iniettata DOPO features[5].
+    Punto scelto (misurato @224px):
+        features[5] -> 112 canali, 14x14  = max canali che conserva 14x14
+        features[6] -> 192 canali,  7x7   (troppo piccola per la CA)
+    Vale se si allena a >= 224px.
+    """
+    def __init__(self, num_classes, pretrained=True, dropout=0.3):
+        super().__init__()
+        weights = models.EfficientNet_B0_Weights.DEFAULT if pretrained else None
+        self.base_model = models.efficientnet_b0(weights=weights)
+
+        # features[5] del B0 ha 112 canali
+        self.ca_block = CoordinateAttention(inp=112, oup=112)
+
+        num_ftrs = self.base_model.classifier[1].in_features   # 1280
+        self.base_model.classifier[0] = nn.Dropout(p=dropout, inplace=True)
+        self.base_model.classifier[1] = nn.Linear(num_ftrs, num_classes)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.base_model.features):
+            x = layer(x)
+            if i == 5:                     # inietta la CA tra blocco 5 e blocco 6
+                x = self.ca_block(x)
+        x = self.base_model.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.base_model.classifier(x)
+        return x
+
 class ModelFactory:
     """Factory per creare modelli di classificazione."""
     
@@ -439,6 +519,16 @@ class ModelFactory:
             model.classifier[2] = nn.Dropout(p=dropout, inplace=True)
             model.classifier[3] = nn.Linear(in_feats, num_classes)
             
+        elif model_name == "efficientnet_b0_ca":
+            model = EfficientNetB0WithMiddleCA(num_classes, pretrained=pretrained, dropout=dropout)
+            if pretrained:
+                for p in model.base_model.parameters():
+                    p.requires_grad = False
+                for p in model.base_model.classifier.parameters():
+                    p.requires_grad = True
+                for p in model.ca_block.parameters():
+                    p.requires_grad = True
+            
         else:
             raise ValueError(f"Modello non supportato: {model_name}")
         
@@ -460,7 +550,21 @@ class ModelFactory:
                     Default: [5, 6, 7] se non specificato.
             n_last_blocks: Numero di ultimi blocchi da sbloccare (solo MobileNet).
         """
-        if "efficientnet" in model_name:
+        if model_name == "efficientnet_b0_ca":
+            # blocchi 0-5 congelati
+            for i in range(6):
+                for p in model.base_model.features[i].parameters():
+                    p.requires_grad = False
+            # blocchi 6-8 sbloccati
+            for i in range(6, 9):
+                for p in model.base_model.features[i].parameters():
+                    p.requires_grad = True
+            for p in model.ca_block.parameters():
+                p.requires_grad = True
+            for p in model.base_model.classifier.parameters():
+                p.requires_grad = True
+            return # Evitiamo il blocco successivo dato che abbiamo gestito il classificatore qui
+        elif "efficientnet" in model_name:
             # Nel fine-tuning si riaprono solo gli ultimi blocchi scelti, evitando
             # di aggiornare tutto il backbone con un dataset piccolo.
             if blocks is None:

@@ -12,6 +12,12 @@ models:
     pretrained: true
     dropout: 0.3
 
+  efficientnet_b0_ca:
+    enabled: true
+    pretrained: true
+    dropout: 0.3
+
+
   efficientnet_b2:
     enabled: false
     pretrained: true
