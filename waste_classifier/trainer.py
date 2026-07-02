@@ -183,14 +183,17 @@ def get_weighted_sampler(dataset) -> WeightedRandomSampler:
     # Ottiene i target solo per questo subset (utile nei fold)
     subset_targets = [targets[i] for i in subset.indices]
     
-    # Conta le frequenze usando torch
-    class_counts = torch.bincount(torch.tensor(subset_targets))
+    # Deduce il numero totale di classi
+    num_classes = max(targets) + 1
     
-    # Evita divisione per zero
-    weights = torch.where(class_counts > 0, 1.0 / class_counts.float(), torch.tensor(0.0))
+    # Conta le frequenze usando torch, forzando la lunghezza per classi mancanti
+    class_counts = torch.bincount(torch.tensor(subset_targets), minlength=num_classes)
     
-    # Assegna il peso ad ogni campione
-    sample_weights = weights[subset_targets]
+    # Evita divisione per zero e applica smoothing con radice quadrata per ridurre overfitting
+    weights = torch.where(class_counts > 0, 1.0 / torch.sqrt(class_counts.float()), torch.tensor(0.0))
+    
+    # Assegna il peso ad ogni campione convertendolo in float64
+    sample_weights = weights[subset_targets].double()
     
     return WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
 
@@ -558,13 +561,10 @@ class ModelFactory:
             n_last_blocks: Numero di ultimi blocchi da sbloccare (solo MobileNet).
         """
         if model_name == "efficientnet_b0_ca":
-            # blocchi 0-5 congelati
-            for i in range(6):
-                for p in model.base_model.features[i].parameters():
-                    p.requires_grad = False
-            # blocchi 6-8 sbloccati
-            for i in range(6, 9):
-                for p in model.base_model.features[i].parameters():
+            if blocks is None:
+                blocks = [5, 6, 7]
+            for block_idx in blocks:
+                for p in model.base_model.features[block_idx].parameters():
                     p.requires_grad = True
             for p in model.ca_block.parameters():
                 p.requires_grad = True
@@ -742,7 +742,7 @@ class Trainer:
             train_loss, train_bal_acc = self.train_epoch(
                 model, optimizer, train_loader, criterion, use_amp
             )
-            val_loss, val_bal_acc = self.evaluate(model, val_loader, criterion, use_amp=use_amp)
+            val_loss, val_bal_acc = self.evaluate(model, val_loader, criterion)
 
             history["train_loss"].append(train_loss)
             history["train_bal_acc"].append(train_bal_acc)

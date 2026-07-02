@@ -90,8 +90,8 @@ def find_optimal_threshold(model, val_loader, device, T, undiff_idx, carveout_in
     best_tau = 0.0
     best_bal_acc = 0.0
     
-    # Scansioniamo la soglia da 0.1 a 0.99
-    taus = np.linspace(0.1, 0.99, 90)
+    # Scansioniamo la soglia da 0.0 a 0.99
+    taus = np.linspace(0.0, 0.99, 100)
     
     for tau in taus:
         routed_preds = apply_reject_routing(logits, T, tau, undiff_idx, carveout_indices).numpy()
