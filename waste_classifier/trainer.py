@@ -25,7 +25,7 @@ from rich.table import Table
 from rich import box
 import os
 import matplotlib.pyplot as plt
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from PIL import Image
 import copy
 
@@ -640,7 +640,7 @@ class Trainer:
         scaler = self._scaler if use_amp else None
         device_type = self.device.type
 
-        for inputs, labels in tqdm(loader, desc="  Training", leave=False):
+        for inputs, labels in tqdm(loader, desc="  Training", leave=False, disable=not self.config.get('training', {}).get('show_progress', True)):
             inputs, labels = inputs.to(self.device), labels.to(self.device)
             optimizer.zero_grad(set_to_none=True)
 
@@ -679,7 +679,7 @@ class Trainer:
         all_labels = []
         device_type = self.device.type
         
-        for inputs, labels in tqdm(loader, desc="  Valutazione", leave=False):
+        for inputs, labels in tqdm(loader, desc="  Valutazione", leave=False, disable=not self.config.get('training', {}).get('show_progress', True)):
             inputs, labels = inputs.to(self.device), labels.to(self.device)
             if use_amp:
                 with torch.amp.autocast(device_type):
@@ -732,50 +732,54 @@ class Trainer:
         phase = phase_name or "training"
         self.resource_tracker.start(phase)
         epochs_run = 0
-        for epoch in range(1, epochs + 1):
-            if self.stop_requested:
-                print("\n[!] Training interrotto manualmente dall'utente.")
-                break
-            epochs_run = epoch
-            # Ogni epoca alterna addestramento e validazione, poi aggiorna
-            # metriche, scheduler ed eventuale checkpoint migliore.
-            train_loss, train_bal_acc = self.train_epoch(
-                model, optimizer, train_loader, criterion, use_amp
-            )
-            val_loss, val_bal_acc = self.evaluate(model, val_loader, criterion)
-
-            history["train_loss"].append(train_loss)
-            history["train_bal_acc"].append(train_bal_acc)
-            history["val_loss"].append(val_loss)
-            history["val_bal_acc"].append(val_bal_acc)
-            for k in history:
-                self.history[k].append(history[k][-1])
-
-            lr_now = optimizer.param_groups[0]['lr']
-            print(f"Epoch {epoch:02d}/{epochs} | "
-                  f"Train Loss: {train_loss:.4f}  Bal-Acc: {train_bal_acc:.4f} | "
-                  f"Val Loss: {val_loss:.4f}  Bal-Acc: {val_bal_acc:.4f} | "
-                  f"lr: {lr_now:.2e}")
-
-            if scheduler is not None:
-                # ReduceLROnPlateau richiede la metrica di validazione; gli altri
-                # scheduler avanzano solo in base all'epoca.
-                if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.step(val_bal_acc)
-                else:
-                    scheduler.step()
-
-            if val_bal_acc > best_val_bal_acc + min_delta:
-                best_weights = copy.deepcopy(model.state_dict())
-                torch.save(model.state_dict(), save_path)
-                print(f"  -> Nuovo miglior modello salvato! (Bal-Acc: {val_bal_acc:.4f})")
-                epochs_no_improve = 0
-                best_val_bal_acc = val_bal_acc
-            else:
-                epochs_no_improve += 1
-                if epochs_no_improve >= patience:
-                    print(f"\nEarly stopping dopo {epoch} epoche.")
+        try:
+            for epoch in range(1, epochs + 1):
+                if self.stop_requested:
+                    print("\n[!] Training interrotto (richiesta stop o interruzione manuale).")
                     break
+                epochs_run = epoch
+                # Ogni epoca alterna addestramento e validazione, poi aggiorna
+                # metriche, scheduler ed eventuale checkpoint migliore.
+                train_loss, train_bal_acc = self.train_epoch(
+                    model, optimizer, train_loader, criterion, use_amp
+                )
+                val_loss, val_bal_acc = self.evaluate(model, val_loader, criterion)
+    
+                history["train_loss"].append(train_loss)
+                history["train_bal_acc"].append(train_bal_acc)
+                history["val_loss"].append(val_loss)
+                history["val_bal_acc"].append(val_bal_acc)
+                for k in history:
+                    self.history[k].append(history[k][-1])
+    
+                lr_now = optimizer.param_groups[0]['lr']
+                print(f"Epoch {epoch:02d}/{epochs} | "
+                      f"Train Loss: {train_loss:.4f}  Bal-Acc: {train_bal_acc:.4f} | "
+                      f"Val Loss: {val_loss:.4f}  Bal-Acc: {val_bal_acc:.4f} | "
+                      f"lr: {lr_now:.2e}")
+    
+                if scheduler is not None:
+                    # ReduceLROnPlateau richiede la metrica di validazione; gli altri
+                    # scheduler avanzano solo in base all'epoca.
+                    if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                        scheduler.step(val_bal_acc)
+                    else:
+                        scheduler.step()
+    
+                if val_bal_acc > best_val_bal_acc + min_delta:
+                    best_weights = copy.deepcopy(model.state_dict())
+                    torch.save(model.state_dict(), save_path)
+                    print(f"  -> Nuovo miglior modello salvato! (Bal-Acc: {val_bal_acc:.4f})")
+                    epochs_no_improve = 0
+                    best_val_bal_acc = val_bal_acc
+                else:
+                    epochs_no_improve += 1
+                    if epochs_no_improve >= patience:
+                        print(f"\nEarly stopping dopo {epoch} epoche.")
+                        break
+        except KeyboardInterrupt:
+            self.stop_requested = True
+            print("\n[!] Interruzione manuale (KeyboardInterrupt) rilevata. Salvataggio del modello corrente...")
 
         # A fine training il modello torna ai pesi migliori osservati in validazione.
         model.load_state_dict(best_weights)
