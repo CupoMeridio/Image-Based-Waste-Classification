@@ -189,11 +189,11 @@ def get_weighted_sampler(dataset) -> WeightedRandomSampler:
     # Conta le frequenze usando torch, forzando la lunghezza per classi mancanti
     class_counts = torch.bincount(torch.tensor(subset_targets), minlength=num_classes)
     
-    # Evita divisione per zero e applica smoothing con radice quadrata per ridurre overfitting
-    weights = torch.where(class_counts > 0, 1.0 / torch.sqrt(class_counts.float()), torch.tensor(0.0))
+    # Evita divisione per zero e calcola i pesi inversamente proporzionali alla frequenza (1/N)
+    weights = torch.where(class_counts > 0, 1.0 / class_counts.float(), torch.tensor(0.0))
     
-    # Assegna il peso ad ogni campione convertendolo in float64
-    sample_weights = weights[subset_targets].double()
+    # Assegna il peso ad ogni campione
+    sample_weights = weights[subset_targets]
     
     return WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
 
@@ -716,10 +716,6 @@ class Trainer:
     ) -> Dict:
         """Training completo con early stopping."""
 
-        # Resetta il flag prima di ogni fase: un'interruzione manuale durante
-        # la FE non deve bloccare automaticamente la FT o i fold successivi.
-        self.stop_requested = False
-
         best_val_bal_acc = initial_best
         epochs_no_improve = 0
         best_weights = copy.deepcopy(model.state_dict())
@@ -796,6 +792,9 @@ class Trainer:
             "batch_size": getattr(train_loader, "batch_size", None),
             "use_amp": use_amp,
         })
+        if self.stop_requested:
+            raise KeyboardInterrupt("Interruzione manuale (UI o Stop) rilevata, propagazione dello stop globale.")
+
         return history
 
     @torch.no_grad()
